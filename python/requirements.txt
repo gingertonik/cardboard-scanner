@@ -1,0 +1,18 @@
+# Core CV + imaging
+opencv-python>=4.10
+numpy>=1.26
+Pillow>=10.3
+
+# HTTP (Scryfall)
+requests>=2.32
+
+# GUI (Phase 3)
+PySide6>=6.7
+
+# OCR — ONNX-based, bundles its own models so there is no external binary to install
+# (unlike pytesseract, which requires a system Tesseract install).
+rapidocr-onnxruntime>=1.3
+
+# Windows-only: DirectShow device names (enumeration order matches OpenCV's CAP_DSHOW
+# index). Linux reads sysfs and macOS uses system_profiler, so neither needs a package.
+pygrabber>=0.2; sys_platform == "win32"
