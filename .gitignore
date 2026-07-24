@@ -1,0 +1,32 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+
+# .NET / Visual Studio
+.vs/
+*.suo
+*.userprefs
+artifacts/
+
+# Rider / VS Code
+.idea/
+.vscode/
+
+# Claude Code local settings (machine-specific)
+.claude/
+
+# App data / local databases (the library lives in %LOCALAPPDATA%, but ignore any stray copies)
+*.db
+*.db-wal
+*.db-shm
+
+# OS cruft
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Published distributables
+dist/
