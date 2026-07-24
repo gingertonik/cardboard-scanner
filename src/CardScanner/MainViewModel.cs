@@ -72,6 +72,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         BuildIndexCommand = new RelayCommand(() => _ = BuildIndexAsync("unique_artwork"), () => !IsBuildingIndex);
         BuildFullIndexCommand = new RelayCommand(() => _ = BuildIndexAsync("default_cards"), () => !IsBuildingIndex);
         CancelBuildCommand = new RelayCommand(() => _buildCts?.Cancel(), () => IsBuildingIndex);
+        RefocusCommand = new RelayCommand(() => _camera.TriggerRefocus());
+        CameraSettingsCommand = new RelayCommand(() => _camera.OpenNativeSettings());
         OpenScryfallCommand = new RelayCommand(OpenScryfall, () => _currentCard?.ScryfallUri != null);
         SearchCommand = new RelayCommand(() => _ = SearchAsync(), () => !string.IsNullOrWhiteSpace(SearchQuery));
         ExportFileCommand = new RelayCommand(ExportToFile);
@@ -111,6 +113,8 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
     public ICommand SearchCommand { get; }
     public ICommand ExportFileCommand { get; }
     public ICommand CopyExportCommand { get; }
+    public ICommand RefocusCommand { get; }
+    public ICommand CameraSettingsCommand { get; }
 
     // ---------------- Bindable collections ----------------
     public ObservableCollection<CameraDevice> Devices { get; } = new();
@@ -196,6 +200,29 @@ public sealed class MainViewModel : ViewModelBase, IDisposable
         }
     }
     public string ZoomText => $"{_zoomLevel:0.0}×";
+
+    private bool _autoFocus = true;
+    public bool AutoFocus
+    {
+        get => _autoFocus;
+        set
+        {
+            if (Set(ref _autoFocus, value))
+            {
+                _camera.SetAutoFocus(value);
+                Raise(nameof(ManualFocusEnabled));
+            }
+        }
+    }
+    /// <summary>Manual focus slider is usable only when autofocus is off.</summary>
+    public bool ManualFocusEnabled => !_autoFocus;
+
+    private double _focusValue = 128;
+    public double FocusValue
+    {
+        get => _focusValue;
+        set { if (Set(ref _focusValue, value)) _camera.SetFocus(value); }
+    }
 
     private ImageSource? _preview;
     public ImageSource? Preview { get => _preview; set => Set(ref _preview, value); }

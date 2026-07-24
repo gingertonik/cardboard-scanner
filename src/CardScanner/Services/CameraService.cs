@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -22,6 +23,11 @@ public sealed class CameraService : IDisposable
     private VideoCapture? _capture;
     private CancellationTokenSource? _cts;
     private Task? _loop;
+
+    // Property changes (focus etc.) are applied on the capture thread — VideoCapture is not
+    // safe to poke from another thread while it is being read.
+    private readonly ConcurrentQueue<Action<VideoCapture>> _commands = new();
+    private bool _autoFocus = true;
 
     public int DeviceIndex { get; private set; }
     public bool IsRunning => _loop is { IsCompleted: false };
@@ -80,6 +86,9 @@ public sealed class CameraService : IDisposable
             FrameWidth = (int)capture.Get(VideoCaptureProperties.FrameWidth);
             FrameHeight = (int)capture.Get(VideoCaptureProperties.FrameHeight);
 
+            try { capture.Set(VideoCaptureProperties.AutoFocus, _autoFocus ? 1 : 0); } catch { }
+            while (_commands.TryDequeue(out _)) { } // drop stale commands from a prior session
+
             _capture = capture;
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
@@ -128,6 +137,12 @@ public sealed class CameraService : IDisposable
         int consecutiveFailures = 0;
         while (!token.IsCancellationRequested && _capture != null)
         {
+            // Apply any queued property changes (focus, native settings) on this thread.
+            while (_commands.TryDequeue(out var cmd))
+            {
+                try { cmd(_capture); } catch { }
+            }
+
             bool ok;
             try { ok = _capture.Read(frame); }
             catch { ok = false; }
@@ -149,6 +164,48 @@ public sealed class CameraService : IDisposable
 
             Thread.Sleep(10); // ~ up to 60-100 fps ceiling; real rate is device-limited
         }
+    }
+
+    // ---------------- Focus / camera controls ----------------
+    // These are applied on the capture thread via the command queue. They are best-effort:
+    // whether they take effect depends on the webcam's driver support through DirectShow.
+
+    /// <summary>Turn continuous autofocus on/off.</summary>
+    public void SetAutoFocus(bool on)
+    {
+        _autoFocus = on;
+        Enqueue(c => c.Set(VideoCaptureProperties.AutoFocus, on ? 1 : 0));
+    }
+
+    /// <summary>Set a manual focus position (also disables autofocus). Range is device-specific.</summary>
+    public void SetFocus(double value)
+    {
+        _autoFocus = false;
+        Enqueue(c =>
+        {
+            c.Set(VideoCaptureProperties.AutoFocus, 0);
+            c.Set(VideoCaptureProperties.Focus, value);
+        });
+    }
+
+    /// <summary>Nudge the camera to re-run autofocus (toggle it off then on).</summary>
+    public void TriggerRefocus()
+    {
+        Enqueue(c =>
+        {
+            c.Set(VideoCaptureProperties.AutoFocus, 0);
+            Thread.Sleep(60);
+            c.Set(VideoCaptureProperties.AutoFocus, 1);
+        });
+        _autoFocus = true;
+    }
+
+    /// <summary>Open the webcam driver's native settings dialog (focus, exposure, etc.).</summary>
+    public void OpenNativeSettings() => Enqueue(c => c.Set(VideoCaptureProperties.Settings, 1));
+
+    private void Enqueue(Action<VideoCapture> command)
+    {
+        if (IsRunning) _commands.Enqueue(command);
     }
 
     public void Stop()

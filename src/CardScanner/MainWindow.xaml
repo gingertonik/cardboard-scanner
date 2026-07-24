@@ -186,15 +186,30 @@
                            HorizontalAlignment="Center" VerticalAlignment="Center"
                            Visibility="{Binding Preview, Converter={x:Static local:NullToVisibilityConverter.Instance}}"/>
 
-                <!-- Zoom overlay (centered digital zoom of the feed + detection input) -->
+                <!-- Zoom + focus overlay -->
                 <Border VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,12"
-                        Background="#B0000000" CornerRadius="16" Padding="12,6">
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="🔍 Zoom" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#DDD"/>
-                        <Slider Minimum="1" Maximum="4" Value="{Binding Zoom}" Width="180" VerticalAlignment="Center"
-                                TickFrequency="0.25" IsSnapToTickEnabled="True"/>
-                        <TextBlock Text="{Binding ZoomText}" VerticalAlignment="Center" Margin="8,0,0,0"
-                                   Width="34" Foreground="White" FontWeight="Bold"/>
+                        Background="#B0000000" CornerRadius="12" Padding="14,8">
+                    <StackPanel>
+                        <!-- Digital zoom (crops + scales the feed and detection input) -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <TextBlock Text="🔍 Zoom" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#DDD"/>
+                            <Slider Minimum="1" Maximum="4" Value="{Binding Zoom}" Width="180" VerticalAlignment="Center"
+                                    TickFrequency="0.25" IsSnapToTickEnabled="True"/>
+                            <TextBlock Text="{Binding ZoomText}" VerticalAlignment="Center" Margin="8,0,0,0"
+                                       Width="34" Foreground="White" FontWeight="Bold"/>
+                        </StackPanel>
+                        <!-- Focus (best-effort via the webcam driver) -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,8,0,0"
+                                    IsEnabled="{Binding IsScanning}">
+                            <TextBlock Text="🎯 Focus" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="#DDD"/>
+                            <CheckBox Content="Auto" IsChecked="{Binding AutoFocus}" Foreground="#DDD" Margin="0,0,10,0"/>
+                            <Button Content="Refocus" Command="{Binding RefocusCommand}" Padding="8,3"/>
+                            <Slider Minimum="0" Maximum="255" Value="{Binding FocusValue}" Width="120" VerticalAlignment="Center"
+                                    Margin="6,0,0,0" IsEnabled="{Binding ManualFocusEnabled}"
+                                    ToolTip="Manual focus (turn Auto off). Left = far, right = close."/>
+                            <Button Content="Camera settings…" Command="{Binding CameraSettingsCommand}" Padding="8,3" Margin="8,0,0,0"
+                                    ToolTip="Open the webcam driver's own settings dialog (focus, exposure, white balance)."/>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
             </Grid>

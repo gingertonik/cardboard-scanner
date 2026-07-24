@@ -120,6 +120,12 @@ as a GitHub Release asset so others can download and run it directly.
 - Even, glare-free lighting helps OCR a lot — angle the card slightly to kill reflections
   on foils.
 - A plain, dark, contrasting background makes card-edge detection more reliable.
+- **Focus:** webcams often hunt or lock onto the background at close range. Use the focus
+  controls under the feed — hit **Refocus**, or turn **Auto** off and set the manual slider
+  so the card is sharp (best for a fixed overhead setup). **Camera settings…** opens your
+  webcam driver's own dialog if the in-app controls don't take effect. Note that **Zoom is
+  digital**, so it magnifies any blur — getting the card larger in the real frame beats
+  zooming in.
 
 ---
 
