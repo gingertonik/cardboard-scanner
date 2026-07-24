@@ -123,7 +123,7 @@ class IndexBuilder:
             progress(IndexProgress(done=True, message="Index update cancelled."))
             return
 
-        already = self._db.complete_scryfall_ids()
+        already = self._indexed_ids()
         fresh = [c for c in cards if c.get("id") and c["id"] not in already and _image_url(c, "small")]
         skipped = len(cards) - len(fresh)
 
@@ -188,7 +188,10 @@ class IndexBuilder:
 
         # 2) Parse from disk, hashing images with bounded concurrency.
         # "Complete" = both hashes present, so rows from an older index get upgraded.
-        already = self._db.complete_scryfall_ids()
+        already = self._indexed_ids()
+        # Claim the index for this hasher *before* writing rows, so an interrupted build can
+        # resume: _indexed_ids() only trusts rows once the marker matches.
+        self._db.set_meta("index_hash_algo", HASH_ALGO)
         approx = APPROX_COUNTS.get(bulk_type, 100_000)
         state = IndexProgress(message=f"Hashing images (0 / ~{approx:,}). {len(already):,} already indexed.")
         progress(state)
@@ -231,6 +234,16 @@ class IndexBuilder:
             tmp.unlink()
         except OSError:
             pass  # leave the temp file for a possible retry
+
+    def _indexed_ids(self) -> set[str]:
+        """Ids that are already usable by *this* hasher.
+
+        Rows written by a different implementation must be re-hashed, not skipped — their
+        hashes are not comparable with ours (see hashing.HASH_ALGO).
+        """
+        if self._db.get_meta("index_hash_algo") != HASH_ALGO:
+            return set()
+        return self._db.complete_scryfall_ids()
 
     def _flush_batch(self, pool: ThreadPoolExecutor, cards: list[dict]) -> int:
         """Download + hash a batch concurrently, then upsert. Returns count added."""

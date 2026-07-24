@@ -59,13 +59,11 @@ def main() -> int:
 
     db = Database()
     print(f"database : {db.db_path}")
-    total = db.index_count()
-    print(f"index    : {total:,} rows")
-    if total == 0:
-        print("\nNo index rows to compare against — build the index in the Windows app first.")
+    # Compare against the C# app's own table — that is the whole point of this tool.
+    entries = db.legacy_index_entries(count)
+    if not entries:
+        print("\nNo C#-built index rows found (match_index) to compare against.")
         return 2
-
-    entries = db.sample_index_entries(count)
     print(f"sampling : {len(entries)} cards\n")
 
     samples = []  # (entry, bgr image)

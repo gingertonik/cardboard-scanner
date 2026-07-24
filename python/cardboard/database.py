@@ -1,7 +1,12 @@
 """SQLite storage — port of the C# Services/Database.cs.
 
-The schema is byte-for-byte compatible with the Windows version, so this opens an
-existing ``cardscanner.db`` (library *and* match index) without conversion.
+The ``collection`` schema is byte-for-byte compatible with the Windows version, so this
+opens an existing ``cardscanner.db`` and shares the user's library with it.
+
+The match index, however, lives in its own table (``match_index_py``). The two apps hash
+images differently (see hashing.HASH_ALGO), so sharing one index table would mean each app
+silently overwriting the other's hashes and breaking its matching. Separate tables let both
+versions coexist during the migration; the index is derived data, so duplicating it is cheap.
 """
 
 from __future__ import annotations
@@ -18,8 +23,11 @@ from .models import CardIndexEntry, ScannedCard
 
 
 def default_db_path() -> Path:
-    """Per-user data location. Matches the Windows app's path on Windows so the
-    existing library and index are picked up; uses OS conventions elsewhere."""
+    """Per-user data location. Matches the Windows app's path on Windows so the existing
+    library is picked up; uses OS conventions elsewhere. ``CARDBOARD_DB`` overrides it."""
+    override = os.environ.get("CARDBOARD_DB")
+    if override:
+        return Path(override)
     if sys.platform == "win32":
         base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
         return base / "CardScanner" / "cardscanner.db"
@@ -70,7 +78,7 @@ class Database:
         with self._connect() as conn:
             conn.executescript(
                 """
-                CREATE TABLE IF NOT EXISTS match_index (
+                CREATE TABLE IF NOT EXISTS match_index_py (
                     scryfall_id      TEXT PRIMARY KEY,
                     oracle_id        TEXT,
                     name             TEXT NOT NULL,
@@ -80,7 +88,7 @@ class Database:
                     phash            INTEGER NOT NULL,
                     art_phash        INTEGER NOT NULL DEFAULT 0
                 );
-                CREATE INDEX IF NOT EXISTS ix_match_index_name ON match_index(name);
+                CREATE INDEX IF NOT EXISTS ix_match_index_py_name ON match_index_py(name);
 
                 CREATE TABLE IF NOT EXISTS meta (
                     key   TEXT PRIMARY KEY,
@@ -116,9 +124,7 @@ class Database:
                 ("condition", "ALTER TABLE collection ADD COLUMN condition TEXT NOT NULL DEFAULT 'NM'"),
                 ("language", "ALTER TABLE collection ADD COLUMN language TEXT NOT NULL DEFAULT 'en'"),
             ])
-            self._migrate(conn, "match_index", [
-                ("art_phash", "ALTER TABLE match_index ADD COLUMN art_phash INTEGER NOT NULL DEFAULT 0"),
-            ])
+            # match_index_py is created above with every column, so it needs no migration.
 
     @staticmethod
     def _migrate(conn: sqlite3.Connection, table: str, adds: list[tuple[str, str]]) -> None:
@@ -147,13 +153,13 @@ class Database:
 
     def index_count(self) -> int:
         with self._connect() as conn:
-            return int(conn.execute("SELECT COUNT(*) FROM match_index").fetchone()[0])
+            return int(conn.execute("SELECT COUNT(*) FROM match_index_py").fetchone()[0])
 
     def complete_scryfall_ids(self) -> set[str]:
         """Ids that are fully hashed (both whole-card and art hashes present)."""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT scryfall_id FROM match_index WHERE phash != 0 AND art_phash != 0"
+                "SELECT scryfall_id FROM match_index_py WHERE phash != 0 AND art_phash != 0"
             ).fetchall()
         return {r[0] for r in rows}
 
@@ -168,7 +174,7 @@ class Database:
         with self._connect() as conn:
             conn.executemany(
                 """
-                INSERT INTO match_index
+                INSERT INTO match_index_py
                     (scryfall_id, oracle_id, name, set_code, collector_number, image_uri, phash, art_phash)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(scryfall_id) DO UPDATE SET
@@ -185,7 +191,7 @@ class Database:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT scryfall_id, oracle_id, name, set_code, collector_number, "
-                "image_uri, phash, art_phash FROM match_index"
+                "image_uri, phash, art_phash FROM match_index_py"
             ).fetchall()
         return [
             CardIndexEntry(
@@ -201,7 +207,7 @@ class Database:
         with self._connect() as conn:
             r = conn.execute(
                 "SELECT scryfall_id, oracle_id, name, set_code, collector_number, "
-                "image_uri, phash, art_phash FROM match_index WHERE scryfall_id = ?",
+                "image_uri, phash, art_phash FROM match_index_py WHERE scryfall_id = ?",
                 (scryfall_id,),
             ).fetchone()
         if not r:
@@ -212,11 +218,32 @@ class Database:
             phash=_to_unsigned(r[6]), art_phash=_to_unsigned(r[7]),
         )
 
+    def legacy_index_entries(self, limit: int) -> list[CardIndexEntry]:
+        """Sample the C# app's ``match_index`` table, for hash-parity comparison only."""
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT scryfall_id, oracle_id, name, set_code, collector_number, "
+                    "image_uri, phash, art_phash FROM match_index "
+                    "WHERE phash != 0 AND art_phash != 0 LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return []  # no legacy table in this database
+        return [
+            CardIndexEntry(
+                scryfall_id=r[0], oracle_id=r[1] or "", name=r[2], set_code=r[3],
+                collector_number=r[4], image_uri=r[5],
+                phash=_to_unsigned(r[6]), art_phash=_to_unsigned(r[7]),
+            )
+            for r in rows
+        ]
+
     def sample_index_entries(self, limit: int) -> list[CardIndexEntry]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT scryfall_id, oracle_id, name, set_code, collector_number, "
-                "image_uri, phash, art_phash FROM match_index "
+                "image_uri, phash, art_phash FROM match_index_py "
                 "WHERE phash != 0 AND art_phash != 0 LIMIT ?",
                 (limit,),
             ).fetchall()

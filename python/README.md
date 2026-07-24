@@ -10,12 +10,40 @@ The original C# app remains in `../src` and is unaffected.
 | 0 | Scaffold, venv, dependencies | ✅ done |
 | 1 | Headless core + self-test parity | ✅ **all 11 checks pass** |
 | 2 | Camera capture, focus, per-OS device names | ✅ core done (verified on Windows) |
-| 3 | PySide6 GUI to feature parity | ⏳ next |
-| 4 | Packaging (PyInstaller) + CI for 3 OSes | ⏳ |
+| 3 | PySide6 GUI to feature parity | ✅ built (smoke-tested headless) |
+| 4 | Packaging (PyInstaller) + CI for 3 OSes | ⏳ next |
 | 5 | Cutover: docs, releases | ⏳ |
 
-Everything except the GUI is ported: models, SQLite database, perceptual + art-crop
-hashing, card detection, OCR, Scryfall client, hybrid matcher, index builder, and export.
+The whole app is ported: models, database, hashing, detection, OCR, Scryfall client, hybrid
+matcher, index builder, export, camera, and the PySide6 GUI.
+
+```bash
+.venv/Scripts/python app.py
+```
+
+## Bundled index — first run takes seconds, not hours
+
+`cardboard/data/index-pack.cbix` ships a pre-built hash index of **116,037 cards in
+3.83 MB** (34.6 bytes/card). On first run it is imported in ~1.5 s instead of downloading
+and hashing 116k images. After that, only cards printed since the pack was built are
+fetched, via a Scryfall `date>=` query — a few hundred cards rather than the 558 MB bulk
+file.
+
+Verified end to end: importing the pack and matching real card images with OCR disabled
+identifies them from the artwork alone (Sol Ring and Pinnacle Monk at Hamming distance 0),
+including across image sizes, since the index is built from "small" images.
+
+Regenerate the pack at release time:
+
+```bash
+python tools/build_full_index.py            # one-time full build into a scratch DB
+```
+
+```bash
+CARDBOARD_DB=<scratch.db> python tools/build_index_pack.py cardboard/data/index-pack.cbix
+```
+
+Set `CARDBOARD_DB` to point the app at a different database (handy for testing).
 
 ## Setup
 
@@ -60,12 +88,14 @@ was ~23 bits (random is 32), i.e. structurally different rather than a tunable d
 
 Consequences:
 
-- **Your library (`collection`) is fully preserved** — the schema is unchanged, so this
-  opens the existing `cardscanner.db` directly.
-- **The image index must be rebuilt** by the Python app. Index rows are derived data, so
-  nothing irreplaceable is lost, but expect a one-time rebuild.
-- `meta['index_hash_algo']` records which implementation built the index (`py-v1` here),
-  so the two versions can never silently mix incompatible hashes.
+- **Your library (`collection`) is fully preserved and shared** — that schema is unchanged,
+  so this opens the existing `cardscanner.db` directly.
+- **The Python index lives in its own table** (`match_index_py`). If both apps shared one
+  index table each would overwrite the other's hashes and quietly break its matching, so
+  the C# app's `match_index` is left untouched and both keep working during the migration.
+- No user-visible rebuild is needed anyway, because the bundled pack ships pre-hashed.
+- `meta['index_hash_algo']` records which implementation built the index (`py-v1` here);
+  the pack importer *refuses* a pack from a different hasher rather than trusting it.
 
 Reproduce the measurement yourself:
 
