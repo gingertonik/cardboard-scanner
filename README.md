@@ -1,4 +1,4 @@
-# MTG Card Scanner
+# Cardboard Scanner
 
 A Windows desktop app that watches a live video device (webcam, capture card, document
 camera), detects a Magic: The Gathering card in frame, identifies it, cross-matches it
