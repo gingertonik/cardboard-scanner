@@ -27,6 +27,22 @@ Archidekt, and spreadsheets.
 
 ---
 
+## Download
+
+Grab **`CardScanner.exe`** from the **[latest release](../../releases/latest)** and run it —
+it's a single self-contained file (the .NET runtime and all native libraries are bundled in),
+so **nothing needs to be installed**. Windows 10/11 only.
+
+- On first run, Windows SmartScreen may say *"Windows protected your PC"* because the file
+  isn't code-signed — click **More info ▸ Run anyway**.
+- **First launch downloads the card index.** In the background it fetches Scryfall's full
+  card data (~550 MB) and hashes every card image so it can match cards by picture. This is a
+  one-time download that runs while you use the app — you can start scanning by name (OCR)
+  immediately; image-hash matching improves as it fills in. It re-syncs new cards about once a
+  week. You can turn this off with the **Auto-update index** checkbox, or trigger it manually.
+
+---
+
 ## Requirements
 
 - Windows 10 (build 19041 / 2004) or Windows 11
