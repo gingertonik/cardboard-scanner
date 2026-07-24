@@ -14,11 +14,13 @@ import json
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 
 from .database import Database
 from .hashing import HASH_ALGO, decode_image, hash_full_and_art
+from .indexpack import IndexPackError, bundled_pack_path, read_pack
 from .models import CardIndexEntry
 from .scryfall import ScryfallClient, _image_url
 
@@ -46,6 +48,113 @@ class IndexBuilder:
         self.image_concurrency = 6
         #: Cards per batch (download+hash, then one DB write).
         self.batch_size = 200
+
+    # ---------------- fast path: bundled pack + incremental top-up ----------------
+
+    def ensure_index(
+        self,
+        progress: ProgressFn,
+        should_cancel: Callable[[], bool] = lambda: False,
+        pack_path: Optional[Path] = None,
+    ) -> None:
+        """Get the index current as cheaply as possible.
+
+        First run imports the bundled pack (seconds, no image downloads); after that only
+        cards printed since the last sync are fetched. Falls back to a full build when no
+        usable pack exists.
+        """
+        pack = pack_path or bundled_pack_path()
+        imported_through: Optional[str] = None
+
+        if self._db.index_count() == 0 and pack.exists():
+            imported_through = self.import_pack(pack, progress)
+
+        anchor = self._db.get_meta("index_synced_through") or imported_through
+        if anchor is None:
+            # Nothing to build on — do the full (expensive) build.
+            self.build("default_cards", progress, should_cancel)
+            return
+
+        self.update_since(anchor, progress, should_cancel)
+
+    def import_pack(self, pack_path: Path, progress: ProgressFn) -> Optional[str]:
+        """Import a pre-built pack. Returns its build date, or None if unusable."""
+        progress(IndexProgress(message=f"Importing bundled index from {pack_path.name}…"))
+        try:
+            pack = read_pack(pack_path)
+        except IndexPackError as e:
+            progress(IndexProgress(message=f"Bundled index unusable: {e}"))
+            return None
+
+        if pack.algo != HASH_ALGO:
+            # Guard against mixing hashes from a different implementation, which would
+            # silently break matching (see hashing.HASH_ALGO).
+            progress(IndexProgress(message=(
+                f"Bundled index was built by '{pack.algo}' but this app uses '{HASH_ALGO}' — "
+                f"ignoring it; a rebuild is required.")))
+            return None
+
+        added = self._db.upsert_index_entries(pack.entries)
+        self._db.set_meta("index_hash_algo", HASH_ALGO)
+        self._db.set_meta("index_synced_through", pack.built)
+        progress(IndexProgress(added=added, message=(
+            f"Imported {added:,} cards from the bundled index (built {pack.built}).")))
+        return pack.built
+
+    def update_since(
+        self,
+        date_iso: str,
+        progress: ProgressFn,
+        should_cancel: Callable[[], bool] = lambda: False,
+    ) -> None:
+        """Hash only cards printed on/after ``date_iso``.
+
+        Avoids the ~558 MB bulk download entirely — typically a few hundred cards a month.
+        Overlaps by a few days so cards added late to an already-released set aren't missed.
+        """
+        try:
+            anchor = datetime.strptime(date_iso, "%Y-%m-%d").date() - timedelta(days=7)
+        except ValueError:
+            anchor = date.today() - timedelta(days=30)
+
+        progress(IndexProgress(message=f"Checking Scryfall for cards printed since {anchor}…"))
+        cards = self._scryfall.cards_released_since(anchor.isoformat())
+        if should_cancel():
+            progress(IndexProgress(done=True, message="Index update cancelled."))
+            return
+
+        already = self._db.complete_scryfall_ids()
+        fresh = [c for c in cards if c.get("id") and c["id"] not in already and _image_url(c, "small")]
+        skipped = len(cards) - len(fresh)
+
+        if not fresh:
+            self._db.set_meta("index_synced_through", date.today().isoformat())
+            progress(IndexProgress(processed=len(cards), skipped=skipped, done=True, message=(
+                f"Index already current — checked {len(cards):,} recent printings, nothing new.")))
+            return
+
+        progress(IndexProgress(processed=len(cards), skipped=skipped, message=(
+            f"Hashing {len(fresh):,} new card(s)…")))
+
+        added = 0
+        with ThreadPoolExecutor(max_workers=self.image_concurrency) as pool:
+            for start in range(0, len(fresh), self.batch_size):
+                if should_cancel():
+                    progress(IndexProgress(added=added, done=True,
+                                           message="Index update cancelled (progress saved)."))
+                    return
+                batch = fresh[start:start + self.batch_size]
+                added += self._flush_batch(pool, batch)
+                progress(IndexProgress(processed=len(cards), added=added, skipped=skipped,
+                                       message=f"Hashing new cards ({added:,}/{len(fresh):,})…"))
+
+        self._db.set_meta("index_hash_algo", HASH_ALGO)
+        self._db.set_meta("index_synced_through", date.today().isoformat())
+        progress(IndexProgress(processed=len(cards), added=added, skipped=skipped, done=True,
+                               message=(f"Index updated: {added:,} new card(s) added. "
+                                        f"Total in index: {self._db.index_count():,}.")))
+
+    # ---------------- full build ----------------
 
     def build(
         self,
@@ -112,6 +221,7 @@ class IndexBuilder:
                 added += self._flush_batch(pool, batch)
 
         self._db.set_meta("index_hash_algo", HASH_ALGO)
+        self._db.set_meta("index_synced_through", date.today().isoformat())
         progress(IndexProgress(
             processed, added, skipped, done=True,
             message=(f"Index build complete. Added {added:,}, skipped {skipped:,}. "

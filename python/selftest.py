@@ -247,7 +247,70 @@ def main() -> int:
     except Exception as e:
         _skip("Scryfall search/printings", f"network error: {e}")
 
-    # 11. Video device enumeration by name
+    # 11. Index pack: round-trip, import, and the algo guard (offline)
+    try:
+        from cardboard.hashing import HASH_ALGO
+        from cardboard.index_builder import IndexBuilder
+        from cardboard.indexpack import read_pack, write_pack
+        from cardboard.models import CardIndexEntry
+
+        entries = [
+            CardIndexEntry(scryfall_id=str(uuid.uuid4()), name=f"Test Card {i}",
+                           set_code="tst", collector_number=str(i),
+                           phash=0xDEADBEEFCAFEF00D + i, art_phash=0x0123456789ABCDEF + i)
+            for i in range(50)
+        ]
+        pack_path = Path(tempfile.gettempdir()) / f"cardboard_pack_{uuid.uuid4().hex}.cbix"
+        write_pack(pack_path, entries, algo=HASH_ALGO, built="2026-07-24")
+        restored = read_pack(pack_path)
+
+        round_trip = (
+            len(restored.entries) == len(entries)
+            and restored.algo == HASH_ALGO
+            and restored.built == "2026-07-24"
+            and all(a.scryfall_id == b.scryfall_id and a.phash == b.phash
+                    and a.art_phash == b.art_phash and a.name == b.name
+                    for a, b in zip(entries, restored.entries))
+        )
+
+        # Import into a fresh DB, then confirm a foreign-algo pack is refused.
+        db_path = _tmp_db()
+        db = Database(db_path)
+        with ScryfallClient() as scry:
+            builder = IndexBuilder(db, scry)
+            built_date = builder.import_pack(pack_path, lambda p: None)
+            imported = db.index_count() == len(entries) and built_date == "2026-07-24"
+            marker = db.get_meta("index_synced_through") == "2026-07-24"
+
+            foreign = Path(tempfile.gettempdir()) / f"cardboard_foreign_{uuid.uuid4().hex}.cbix"
+            write_pack(foreign, entries, algo="csharp-coenm", built="2026-07-24")
+            rejected = IndexBuilder(Database(_tmp_db()), scry).import_pack(foreign, lambda p: None) is None
+
+        if round_trip and imported and marker and rejected:
+            _pass("Index pack", f"{len(entries)} entries round-tripped, imported, foreign algo rejected")
+        else:
+            _fail("Index pack", f"roundTrip={round_trip}, imported={imported}, "
+                                f"marker={marker}, rejected={rejected}")
+        for p in (pack_path, foreign, db_path):
+            p.unlink(missing_ok=True)
+    except Exception as e:
+        _fail("Index pack", f"{type(e).__name__}: {e}")
+
+    # 12. Incremental update query (network) — the cheap alternative to the bulk download
+    try:
+        if online is None:
+            _skip("Incremental index query", "requires network access")
+        else:
+            with ScryfallClient() as scry:
+                recent = scry.cards_released_since("2026-07-01", max_pages=2)
+            if recent and all(c.get("id") for c in recent):
+                _pass("Incremental index query", f"{len(recent)} recent printings (2 pages max)")
+            else:
+                _fail("Incremental index query", f"returned {len(recent)} usable cards")
+    except Exception as e:
+        _skip("Incremental index query", f"network error: {e}")
+
+    # 13. Video device enumeration by name
     try:
         devices = camera.enumerate_devices()
         if not devices:

@@ -135,6 +135,34 @@ class ScryfallClient:
             timeout,
         )
 
+    def cards_released_since(self, date_iso: str, max_pages: int = 200) -> list[dict]:
+        """Raw card objects released on/after ``date_iso`` (YYYY-MM-DD).
+
+        Used for incremental index updates: far cheaper than re-downloading the ~558 MB
+        bulk file just to discover what is new. Scryfall's syntax is ``date>=`` (note that
+        ``released>=`` is not valid). Returns raw dicts because the index builder needs the
+        image URLs, not our trimmed model.
+        """
+        results: list[dict] = []
+        url: Optional[str] = f"{API_BASE}/cards/search"
+        params: Optional[dict] = {"unique": "prints", "order": "released",
+                                  "q": f"date>={date_iso}"}
+        for _ in range(max_pages):
+            if not url:
+                break
+            self._throttle()
+            try:
+                r = self._session.get(url, params=params, timeout=30)
+            except requests.RequestException:
+                break
+            if r.status_code == 404 or not r.ok:  # no cards matched
+                break
+            payload = r.json()
+            results.extend(payload.get("data", []))
+            url = payload.get("next_page") if payload.get("has_more") else None
+            params = None  # next_page already carries the query
+        return results
+
     def _run_search(self, url: str, params: Optional[dict], timeout: float) -> list[ScannedCard]:
         results: list[ScannedCard] = []
         # Follow pagination a few pages at most (175 cards/page is ample here).
