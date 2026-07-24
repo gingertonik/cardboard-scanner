@@ -1,4 +1,6 @@
-# Core CV + imaging
+# Core CV + imaging. Hashing runs directly on numpy arrays, but Pillow is still required:
+# RapidOCR imports it internally, so it must be installed and must not be excluded from
+# frozen builds.
 opencv-python>=4.10
 numpy>=1.26
 Pillow>=10.3

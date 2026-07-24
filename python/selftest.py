@@ -126,7 +126,8 @@ def main() -> int:
     try:
         ocr = OcrService()
         if not ocr.available:
-            _skip("OCR", "no OCR engine available")
+            # In a frozen build this indicates a packaging problem, so show the cause.
+            _skip("OCR", f"engine unavailable - {ocr.init_error or 'not installed'}")
         else:
             card_img = np.full((CARD_HEIGHT, CARD_WIDTH, 3), 240, dtype=np.uint8)
             cv2.putText(card_img, "Lightning Bolt", (20, 52), cv2.FONT_HERSHEY_DUPLEX,
@@ -310,7 +311,27 @@ def main() -> int:
     except Exception as e:
         _skip("Incremental index query", f"network error: {e}")
 
-    # 13. Video device enumeration by name
+    # 13. Bundled pack reachable (proves data files survive freezing)
+    try:
+        from cardboard.hashing import HASH_ALGO as _algo
+        from cardboard.indexpack import bundled_pack_path, read_pack
+
+        pack_file = bundled_pack_path()
+        if not pack_file.exists():
+            _skip("Bundled index pack", f"not present ({pack_file})")
+        else:
+            bundled = read_pack(pack_file)
+            size_mb = pack_file.stat().st_size / (1024 * 1024)
+            if bundled.algo == _algo and len(bundled.entries) > 1000:
+                _pass("Bundled index pack",
+                      f"{len(bundled.entries):,} cards, {size_mb:.2f} MB, built {bundled.built}")
+            else:
+                _fail("Bundled index pack",
+                      f"algo={bundled.algo} (want {_algo}), entries={len(bundled.entries)}")
+    except Exception as e:
+        _fail("Bundled index pack", f"{type(e).__name__}: {e}")
+
+    # 14. Video device enumeration by name
     try:
         devices = camera.enumerate_devices()
         if not devices:

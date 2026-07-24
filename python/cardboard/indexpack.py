@@ -156,5 +156,16 @@ def read_pack(path: Path) -> IndexPack:
 
 
 def bundled_pack_path() -> Path:
-    """Location of the pack shipped alongside the app (absent in a source checkout)."""
+    """Location of the pack shipped alongside the app.
+
+    Works both from a source checkout and from a PyInstaller bundle, where data files are
+    unpacked under ``sys._MEIPASS`` rather than sitting next to the source.
+    """
+    import sys
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        bundled = Path(meipass) / "cardboard" / "data" / "index-pack.cbix"
+        if bundled.exists():
+            return bundled
     return Path(__file__).resolve().parent / "data" / "index-pack.cbix"

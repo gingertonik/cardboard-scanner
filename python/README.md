@@ -11,7 +11,7 @@ The original C# app remains in `../src` and is unaffected.
 | 1 | Headless core + self-test parity | ✅ **all 11 checks pass** |
 | 2 | Camera capture, focus, per-OS device names | ✅ core done (verified on Windows) |
 | 3 | PySide6 GUI to feature parity | ✅ built (smoke-tested headless) |
-| 4 | Packaging (PyInstaller) + CI for 3 OSes | ⏳ next |
+| 4 | Packaging (PyInstaller) + CI for 3 OSes | ✅ Windows verified; mac/Linux build in CI, untested |
 | 5 | Cutover: docs, releases | ⏳ |
 
 The whole app is ported: models, database, hashing, detection, OCR, Scryfall client, hybrid
@@ -66,6 +66,29 @@ camera device naming:
 ```bash
 .venv/Scripts/python selftest.py
 ```
+
+## Packaging
+
+```bash
+python -m pip install -r requirements-dev.txt
+```
+
+```bash
+pyinstaller packaging/cardboard.spec --noconfirm
+```
+
+Produces a single ~141 MB executable on Windows/Linux and a `Cardboard Scanner.app` bundle
+on macOS (a bundle is required there — a bare binary cannot request camera permission).
+PyInstaller cannot cross-compile, so [`build-python.yml`](../.github/workflows/build-python.yml)
+builds all three on their own runners and attaches them to a `v*` tag release.
+
+CI runs the self-test twice — from source *and* against the frozen build. That second run
+matters: it is what caught OCR silently failing because Pillow had been excluded from the
+bundle (RapidOCR imports Pillow internally even though this app never does). A frozen build
+must report `PASS OCR` and `PASS Bundled index pack`, not `SKIP`.
+
+Both builds are **unsigned**, so first launch needs a nudge: Windows SmartScreen →
+*More info ▸ Run anyway*; macOS Gatekeeper → right-click ▸ *Open*.
 
 ## Platform notes
 

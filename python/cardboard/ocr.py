@@ -19,11 +19,16 @@ import numpy as np
 class OcrService:
     def __init__(self) -> None:
         self._engine = None
+        #: Why the engine could not start, if it could not. Surfaced rather than swallowed so
+        #: a packaging problem (missing models/native libs) is diagnosable instead of silently
+        #: degrading the app to image-hash-only matching.
+        self.init_error: Optional[str] = None
         try:
             from rapidocr_onnxruntime import RapidOCR
             self._engine = RapidOCR()
-        except Exception:
-            self._engine = None  # OCR unavailable; matching falls back to image hashing
+        except Exception as e:
+            self._engine = None  # matching falls back to image hashing
+            self.init_error = f"{type(e).__name__}: {e}"
 
     @property
     def available(self) -> bool:
