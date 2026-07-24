@@ -8,6 +8,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- Display name (window title, exe file properties). Assembly/exe filename stays CardScanner. -->
+    <Product>Cardboard Scanner</Product>
+    <AssemblyTitle>Cardboard Scanner</AssemblyTitle>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
