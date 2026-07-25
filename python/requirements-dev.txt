@@ -1,0 +1,4 @@
+# Build/packaging only — not needed to run the app.
+-r requirements.txt
+
+pyinstaller>=6.6
