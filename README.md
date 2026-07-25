@@ -1,15 +1,14 @@
 # Cardboard Scanner
 
-A Windows desktop app that watches a live video device (webcam, capture card, document
-camera), detects a Magic: The Gathering card in frame, identifies it, cross-matches it
-against the [Scryfall](https://scryfall.com) database, and files it into a local library
-of everything you've scanned.
+A desktop app for **Windows, macOS, and Linux** that watches a live video device (webcam,
+capture card, document camera), detects a Magic: The Gathering card in frame, identifies it,
+cross-matches it against the [Scryfall](https://scryfall.com) database, and files it into a
+local library of everything you've scanned.
 
 Matching is **hybrid**:
 
-1. **OCR the title** — the card's name is read from the top strip using the built-in
-   Windows OCR engine (no Tesseract binaries to install), then looked up on Scryfall via
-   fuzzy name search.
+1. **OCR the title** — the card's name is read from the top strip, then looked up on
+   Scryfall via fuzzy name search. No separate OCR install is needed.
 2. **Perceptual image hash** — the card is hashed and compared against a local index of
    Scryfall images, as a fallback when text is unreadable (worn cards, glare, foils,
    non-English printings) and to *confirm* an OCR hit. Two hashes are compared per card: the
@@ -29,82 +28,116 @@ Archidekt, and spreadsheets.
 
 ## Download
 
-Grab **`CardScanner.exe`** from the **[latest release](../../releases/latest)** and run it —
-it's a single self-contained file (the .NET runtime and all native libraries are bundled in),
-so **nothing needs to be installed**. Windows 10/11 only.
+Grab your platform's build from the **[latest release](../../releases/latest)**. Each one is
+self-contained — the runtime, OpenCV, the OCR models, and a pre-built card index are all
+bundled, so **nothing needs to be installed**.
 
-- On first run, Windows SmartScreen may say *"Windows protected your PC"* because the file
-  isn't code-signed — click **More info ▸ Run anyway**.
-- **First launch downloads the card index.** In the background it fetches Scryfall's full
-  card data (~550 MB) and hashes every card image so it can match cards by picture. This is a
-  one-time download that runs while you use the app — you can start scanning by name (OCR)
-  immediately; image-hash matching improves as it fills in. It re-syncs new cards about once a
-  week. You can turn this off with the **Auto-update index** checkbox, or trigger it manually.
+| Platform | Download | Run it |
+|----------|----------|--------|
+| **Windows** 10/11 | `CardboardScanner-windows.zip` | Unzip, run `CardboardScanner.exe` |
+| **macOS** 11+ | `CardboardScanner-macos.zip` | Unzip, move `Cardboard Scanner.app` to Applications |
+| **Linux** (x64) | `CardboardScanner-linux.tar.gz` | `tar -xzf …` then `./CardboardScanner` |
+
+The builds are **unsigned**, so the first launch needs a nudge:
+
+- **Windows** SmartScreen says *"Windows protected your PC"* → **More info ▸ Run anyway**.
+- **macOS** Gatekeeper refuses an unidentified developer → **right-click ▸ Open**, then allow
+  camera access when prompted.
+
+**First launch is fast.** A pre-built hash index of ~116,000 cards ships inside the app and
+loads in about a second, so image matching works immediately. The app then fetches only cards
+printed since that index was built — a few hundred cards, not a 550 MB download. Untick
+**Auto-update index** to skip even that.
 
 ---
 
 ## Requirements
 
-- Windows 10 (build 19041 / 2004) or Windows 11
-- [.NET 8 SDK](https://dotnet.microsoft.com/download) (or newer) — the project targets
-  `net8.0-windows10.0.19041.0`
-- A connected video device (USB webcam, capture card, etc.)
-- Internet access for Scryfall lookups and to build the image index
+**To run a release build:** nothing but the OS and a video device. Internet access is used
+for Scryfall lookups (card details, prices, printings) and for topping up the index.
 
-Everything else (OpenCV, image hashing, SQLite, OCR) comes from NuGet or Windows itself.
-
-> **Just want to run it?** Grab `CardScanner.exe` from the
-> [Releases](../../releases) page — it's a single self-contained file with the .NET runtime
-> and all native libraries bundled in, so **no installs are needed**. Windows 10/11 only.
-> On first launch, Windows SmartScreen may say *"Windows protected your PC"* because the
-> download is unsigned — click **More info ▸ Run anyway**.
+**To run from source:** Python 3.12+ (see [`python/`](python/README.md)). The legacy Windows
+version needs the [.NET 8 SDK](https://dotnet.microsoft.com/download) instead.
 
 ---
 
-## Build & run
+## Two versions
+
+This repo contains the cross-platform rewrite and the original Windows app:
+
+| | [`python/`](python/README.md) — **current** | [`src/`](src/) — legacy |
+|---|---|---|
+| Platforms | Windows, macOS, Linux | Windows only |
+| Stack | Python + PySide6 (Qt) | C# + WPF |
+| OCR | RapidOCR (bundled ONNX models) | `Windows.Media.Ocr` |
+| Card index | **ships pre-built** (~116k cards) | built on first run (hours) |
+
+The C# version still works and is kept for reference; new work happens in `python/`.
+
+### Migrating from the Windows (C#) version
+
+- **Your library carries over automatically.** Both versions read the same
+  `collection` table in the same database file, so scanned cards, quantities, finishes, and
+  conditions are all there on first launch.
+- **The image index does not carry over, and does not need to.** The two versions hash
+  images differently, so the Python app keeps its index in a separate table
+  (`match_index_py`) and ships one pre-built. Nothing is lost and the C# app keeps working —
+  see [`python/README.md`](python/README.md#important-hashes-are-not-interchangeable-with-the-c-version)
+  for why.
+- You can run either version, in any order, without breaking the other.
+
+---
+
+## Build & run from source
+
+The cross-platform app lives in [`python/`](python/README.md):
 
 ```bash
-dotnet build src/CardScanner/CardScanner.csproj -c Release
+python -m venv .venv && .venv/Scripts/python -m pip install -r python/requirements.txt
 ```
 
-Then launch the app:
+```bash
+.venv/Scripts/python python/app.py
+```
+
+Headless verification of the whole non-UI pipeline (database, hashing, detection, OCR,
+Scryfall, matcher, exports, index pack, camera naming):
+
+```bash
+.venv/Scripts/python python/selftest.py
+```
+
+Packaging for all three platforms is automated in
+[`.github/workflows/build-python.yml`](.github/workflows/build-python.yml); see
+[`python/README.md`](python/README.md#packaging) for local builds.
+
+<details>
+<summary>Legacy Windows (C#) build commands</summary>
 
 ```bash
 dotnet run --project src/CardScanner/CardScanner.csproj -c Release
 ```
 
-or run the built executable at
-`src/CardScanner/bin/Release/net8.0-windows10.0.19041.0/win-x64/CardScanner.exe`.
-
-### Headless self-test
-
-The non-UI pipeline (database, hashing, card detection, OCR, Scryfall lookup/search/
-printings, hybrid matcher, finish-based dedup, and all export formats) can be verified
-without opening the window:
+Headless self-test (writes `%TEMP%\cardscanner_selftest.log`):
 
 ```bash
 CardScanner.exe --selftest
 ```
 
-Results print to the console and are written to `%TEMP%\cardscanner_selftest.log`.
-
-### Publishing a standalone exe
-
-To produce the single self-contained `CardScanner.exe` that runs with no prerequisites:
+Single self-contained exe (~110 MB):
 
 ```bash
 dotnet publish src/CardScanner/CardScanner.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
 ```
 
-The exe (~110 MB) lands in
-`src/CardScanner/bin/Release/net8.0-windows10.0.19041.0/win-x64/publish/`. Upload that file
-as a GitHub Release asset so others can download and run it directly.
+</details>
 
 ---
 
 ## Using the app
 
-1. **Select a device** from the dropdown (press **Refresh** to re-scan device indices).
+1. **Select a device** from the dropdown — it lists cameras by name (press **Refresh** to
+   re-scan).
 2. Press **▶ Start**. The live feed appears on the left.
 3. Hold a card up to the camera, filling a good portion of the frame, reasonably flat and
    well lit. A detected card is warped upright and identified; the best match shows on the
@@ -187,41 +220,29 @@ when prompted map the printing key to **Scryfall ID** for exact matches.
 
 ## The image index (perceptual-hash matching)
 
+Each card contributes two hashes: the whole card and its art crop.
+
+### It ships pre-built
+
+A pack of **~116,000 cards in 3.83 MB** is bundled inside the app and imported in about a
+second on first launch, so image matching works right away. Nothing is downloaded to get
+there.
+
 ### Automatic updates
 
-With **Auto-update index** ticked (default, in the toolbar), the app maintains the index for
-you: on first launch it builds the **full** index in the background (you can scan while it
-works), and on later launches it re-syncs only if the index is more than a week old,
-downloading the current card list and hashing **only cards that are new or missing an art
-hash** — everything already indexed is skipped. Untick it to manage the index manually with
-the buttons below. Each card contributes a whole-card hash and an art-crop hash.
+With **Auto-update index** ticked (default), the app keeps the index current on its own. On
+launch it imports the bundled pack if needed, then asks Scryfall for cards printed since the
+pack was built (a `date>=` search — typically a few hundred cards) and hashes just those. It
+re-checks about once a week.
 
-> The weekly re-sync still downloads the bulk *list* (to see what's new) even though it only
-> fetches images for missing cards — that's the only way to diff against Scryfall. Manual
-> builds are always available and are resumable.
+> This replaces what the legacy version did, which was to download Scryfall's 558 MB bulk
+> file *just to discover what was missing*. The date query returns the same answer for a
+> fraction of the bandwidth.
 
-Out of the box the app can also match by **name via OCR + Scryfall** with no local index.
-To (re)build the local image index manually:
-
-- **Build image index** — Scryfall's *unique-artwork* set (~265 MB, ~50k cards). One entry
-  per distinct illustration; enough to identify *what* a card is. **Recommended.**
-- **Build FULL index** — *every* printing (~558 MB, ~100k cards). Larger/slower, but lets
-  the image hash distinguish specific set printings.
-
-The build:
-
-1. **downloads the bulk file to a temp file first** (a single bounded transfer), then
-2. parses it from disk and **hashes card images with several concurrent downloads**.
-
-It is **resumable** — an intact downloaded file is reused, and cards already in the index
-are skipped, so you can cancel and re-run. Progress (MB downloaded, then cards hashed)
-shows in the status bar.
-
-> **Time:** the image-hashing pass is the slow part — roughly 15–30 minutes for
-> unique-artwork and longer for the full set, depending on your connection. It's a one-time
-> job; later runs just fill in new cards. **The count climbs into the tens of thousands —
-> if it stops at only a few thousand, the build was interrupted; just run it again to
-> resume.**
+**Full rebuild** re-hashes every printing from the bulk data. It exists for completeness —
+you should not normally need it, since it takes far longer and produces the same result as the
+bundled pack plus a top-up. It downloads the bulk file to disk first, then hashes images
+concurrently, and is **resumable**: interrupt it and re-run to continue where it stopped.
 
 ### If a card is mis-identified or unmatched
 
@@ -241,89 +262,113 @@ shows in the status bar.
 
 Everything lives in a single SQLite database:
 
-```
-%LOCALAPPDATA%\CardScanner\cardscanner.db
-```
+| Platform | Location |
+|----------|----------|
+| Windows | `%LOCALAPPDATA%\CardScanner\cardscanner.db` |
+| macOS | `~/Library/Application Support/CardboardScanner/cardscanner.db` |
+| Linux | `~/.local/share/cardboard-scanner/cardscanner.db` |
 
 - `collection` — your scanned library (name, set, collector number, rarity, mana cost,
   type, USD + foil price snapshot, **foil / condition / language**, quantity, timestamp,
-  Scryfall links).
-- `match_index` — the perceptual-hash index built from Scryfall bulk data.
+  Scryfall links). Shared by both versions.
+- `match_index_py` / `match_index` — the perceptual-hash index. The two versions hash
+  differently, so each keeps its own table and neither disturbs the other.
+- `meta` — index bookkeeping (which hasher built it, how current it is, settings).
 
 Older databases are migrated automatically (the foil/condition/language/foil-price columns
 are added in place; existing rows default to non-foil / NM / English).
 
-Delete the file to reset everything; back it up to preserve your library.
+Set `CARDBOARD_DB` to use a different database file. Delete the file to reset everything;
+back it up to preserve your library — the index rebuilds itself, your library does not.
 
 ---
 
 ## How it works (architecture)
 
 ```
-Camera (OpenCvSharp) ─► CardDetector ─► warped upright card
-                                          │
-                        ┌─────────────────┼───────────────────┐
-                        ▼                                     ▼
-                  OcrService                          PerceptualHasher
-             (Windows.Media.Ocr on           (64-bit pHash vs. local index,
-              the title strip)                 Hamming-distance search)
-                        │                                     │
-                        └──────────────► CardMatcher ◄────────┘
-                                            │  (hybrid: name lookup,
-                                            │   hash fallback, hash confirm)
-                                            ▼
-                                      ScryfallClient
-                                   (fuzzy name / by-id,
-                                    rate-limited)
-                                            │
-                                            ▼
-                                    Database (SQLite)
-                                   collection + match_index
+Camera (OpenCV) ─► CardDetector ─► warped upright 488x680 card
+                                     │
+                     ┌───────────────┴───────────────┐
+                     ▼                               ▼
+                 OcrService                  PerceptualHasher
+          (contrast-enhanced title     (whole-card + art-crop 64-bit
+           strip, several passes)       hashes vs. the local index)
+                     │                               │
+                     └────────► CardMatcher ◄────────┘
+                                    │  hybrid: name lookup, hash
+                                    │  fallback, hash confirmation,
+                                    │  margin test to refuse guesses
+                                    ▼
+                              ScryfallClient
+                    (fuzzy name / by-id / search / printings,
+                     bulk data, images — rate limited)
+                                    │
+                                    ▼
+                            Database (SQLite)
+                       collection + index + meta
 ```
 
-| File | Responsibility |
-|------|----------------|
-| `Services/CameraService.cs`   | Background frame capture from the video device |
-| `Services/CardDetector.cs`    | Contour/quad detection + perspective warp to a flat 488×680 card |
-| `Services/OcrService.cs`      | Reads the card name from the title strip (Windows OCR) |
-| `Services/PerceptualHasher.cs`| pHash compute + Hamming-distance comparison |
-| `Services/ScryfallClient.cs`  | Rate-limited Scryfall API (fuzzy name, by-id, **search**, **printings**, bulk data, images) |
-| `Services/IndexBuilder.cs`    | Builds/updates the local pHash index from Scryfall bulk data |
-| `Services/CardMatcher.cs`     | Hybrid identification logic and confidence scoring |
-| `Services/CollectionExporter.cs` | Serializes the library to Moxfield / Archidekt / plain / generic CSV formats |
-| `Services/Database.cs`        | SQLite storage for the library and the index (with schema migration) |
-| `MainViewModel.cs` / `MainWindow.xaml` | WPF UI: live feed, current-match + printing/finish pickers, manual search, editable library, export |
+Both trees share this structure. Python files are under `python/cardboard/`, the legacy C#
+equivalents under `src/CardScanner/Services/`:
+
+| Module | Responsibility |
+|--------|----------------|
+| `camera` | Frame capture on a background thread; per-OS device names; focus control |
+| `detector` | Contour/quad detection + perspective warp to a flat 488×680 card |
+| `ocr` | Reads the card name from the title strip, trying several enhanced variants |
+| `hashing` | Whole-card and art-crop pHash + Hamming-distance comparison |
+| `scryfall` | Rate-limited API: fuzzy name, by-id, search, printings, bulk data, images |
+| `index_builder` | Imports the bundled pack, incremental top-ups, and full rebuilds |
+| `indexpack` | Read/write the compact shipped index pack *(Python only)* |
+| `matcher` | Hybrid identification, confidence scoring, and the margin test |
+| `exporter` | Moxfield / Archidekt / plain / generic CSV serialisation |
+| `database` | SQLite storage for the library and the index, with schema migration |
+| `ui/main_window` | Live feed, match panel, manual search, editable library, export |
 
 ### Scryfall etiquette
 
 The client sends an identifying `User-Agent`, accepts JSON, and spaces API requests
-~100 ms apart, per Scryfall's [API guidelines](https://scryfall.com/docs/api). Card images
-are downloaded from Scryfall's CDN with an added politeness delay during index builds.
-Scryfall data and images are © Wizards of the Coast / Scryfall and used per their terms.
+~100 ms apart, per Scryfall's [API guidelines](https://scryfall.com/docs/api). Shipping a
+pre-built index means normal use makes almost no bulk requests at all. Scryfall data and
+images are © Wizards of the Coast / Scryfall and used per their terms; the bundled pack
+contains only non-reversible 64-bit fingerprints and card identifiers, never artwork.
 
 ---
 
 ## Tuning
 
-Detection and matching thresholds are constants you can adjust in code:
+Detection and matching thresholds are constants you can adjust in code (Python names shown;
+the C# properties match):
 
-- `CardDetector.MinAreaFraction` — how much of the frame a card must fill to be considered.
-- `CardMatcher.PhashAcceptDistance` — max Hamming distance to accept a pure image-hash match.
-- `CardMatcher.PhashConfirmDistance` — max distance for the image to *confirm* an OCR name.
-- `MainViewModel.ProcessIntervalMs` — how often frames are analyzed.
-- The auto-add confidence threshold (`0.80`) and frame-stability requirement in
-  `MainViewModel.OnMatch`.
+- `CardDetector.min_area_fraction` — how much of the frame a card must fill to be considered.
+- `CardMatcher.phash_accept_distance` — max Hamming distance to accept a pure image-hash match.
+- `CardMatcher.phash_margin_requirement` — how far the best match must beat the runner-up.
+- `CardMatcher.phash_confirm_distance` — max distance for the image to *confirm* an OCR name.
+- `PROCESS_INTERVAL` in `ui/main_window.py` — how often frames are analysed.
+- The auto-add confidence threshold (`0.80`) and frame-stability requirement in `_on_match`.
+- `hashing.ART_X0/Y0/X1/Y1` — the art window used for the art-crop hash. Changing these
+  invalidates an existing index.
 
 ---
 
 ## Troubleshooting
 
 - **"No video devices found."** Press **Refresh**. Close other apps using the camera
-  (Teams/Zoom/Camera app). Try different device indices.
-- **Feed is black / won't start.** Another application may hold the camera exclusively, or
-  Windows camera privacy settings block desktop apps (Settings ▸ Privacy ▸ Camera ▸ "Let
-  desktop apps access your camera").
-- **Poor OCR reads.** Improve lighting, reduce glare, fill more of the frame, hold the card
-  flatter. Build the image index so hash matching can back up OCR.
-- **Wrong printing identified.** OCR name lookup returns Scryfall's default printing. Build
-  the **FULL** index to distinguish printings by image.
+  (Discord/Teams/Zoom/Camera app).
+- **"Camera unavailable" when starting.** Another application holds the camera. Close it, or
+  pick a different device. On Windows also check Settings ▸ Privacy ▸ Camera ▸ *"Let desktop
+  apps access your camera"*; on macOS, allow camera access on first launch (System Settings ▸
+  Privacy & Security ▸ Camera).
+- **Blurry when zoomed.** Zoom is *digital*, so it magnifies blur. Use the focus controls —
+  **Refocus**, or turn **Auto** off and set the manual slider. Getting the card larger in the
+  real frame beats zooming.
+- **Poor OCR reads.** Improve lighting and reduce glare; hold the card flat and filling the
+  frame. Image-hash matching backs OCR up regardless.
+- **Wrong or missing match.** The matcher refuses to guess when the nearest indexed image is
+  ambiguous, and says why in the status bar. Use **Manual search** to add the card, and the
+  **Printing** dropdown to pick the exact set.
+- **macOS: "app is damaged" or won't open.** The build is unsigned — right-click ▸ **Open**
+  rather than double-clicking. If Gatekeeper still refuses:
+  `xattr -d com.apple.quarantine "/Applications/Cardboard Scanner.app"`.
+- **Linux: fails to start with a Qt/xcb error.** Install the usual Qt runtime libraries:
+  `sudo apt install libgl1 libegl1 libxkbcommon-x11-0 libdbus-1-3 libxcb-cursor0`.

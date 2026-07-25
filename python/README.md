@@ -12,7 +12,7 @@ The original C# app remains in `../src` and is unaffected.
 | 2 | Camera capture, focus, per-OS device names | ✅ core done (verified on Windows) |
 | 3 | PySide6 GUI to feature parity | ✅ built (smoke-tested headless) |
 | 4 | Packaging (PyInstaller) + CI for 3 OSes | ✅ Windows verified; mac/Linux build in CI, untested |
-| 5 | Cutover: docs, releases | ⏳ |
+| 5 | Cutover: docs, releases | ✅ docs done; awaiting a tagged release |
 
 The whole app is ported: models, database, hashing, detection, OCR, Scryfall client, hybrid
 matcher, index builder, export, camera, and the PySide6 GUI.
@@ -89,6 +89,21 @@ must report `PASS OCR` and `PASS Bundled index pack`, not `SKIP`.
 
 Both builds are **unsigned**, so first launch needs a nudge: Windows SmartScreen →
 *More info ▸ Run anyway*; macOS Gatekeeper → right-click ▸ *Open*.
+
+### Cutting a release
+
+Pushing a `v*` tag builds all three platforms and attaches them to a GitHub Release:
+
+```bash
+git tag v2.0.0 && git push origin v2.0.0
+```
+
+Refresh the index pack first if it has aged (it anchors the incremental sync, so a stale pack
+just means new users fetch a few more cards on first run):
+
+```bash
+python tools/build_full_index.py && CARDBOARD_DB=<scratch.db> python tools/build_index_pack.py cardboard/data/index-pack.cbix
+```
 
 ## Platform notes
 
