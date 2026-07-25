@@ -60,6 +60,14 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: python selftest.py
 
+      # Verifies that worker-thread results actually reach the widgets. A widget-exists
+      # check missed a bug where QTimer.singleShot from a worker thread silently never
+      # fired, leaving the device list empty.
+      - name: GUI smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python tools/gui_smoke.py
+
       - name: Build with PyInstaller
         run: pyinstaller packaging/cardboard.spec --noconfirm
 

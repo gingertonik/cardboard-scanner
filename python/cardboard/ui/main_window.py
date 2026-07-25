@@ -41,7 +41,12 @@ PROCESS_INTERVAL = 0.2  # seconds between analysed frames
 
 
 class Bridge(QObject):
-    """Signals used to hand data from background threads to the GUI thread."""
+    """Signals used to hand data from background threads to the GUI thread.
+
+    Everything crossing a thread boundary must go through a signal. QTimer.singleShot is
+    *not* an alternative: it needs an event loop on the calling thread, so from a worker
+    thread it silently never fires.
+    """
 
     frame = Signal(object)
     match = Signal(object)
@@ -51,6 +56,9 @@ class Bridge(QObject):
     search_results = Signal(object)
     connect_result = Signal(bool, str, str)
     index_finished = Signal()
+    devices = Signal(object)
+    card_image = Signal(object)
+    camera_error = Signal(str)
 
 
 def _panel(object_name: str = "panel") -> QFrame:
@@ -437,9 +445,13 @@ class MainWindow(QMainWindow):
         self.bridge.search_results.connect(self._on_search_results)
         self.bridge.connect_result.connect(self._on_connect_result)
         self.bridge.index_finished.connect(self._on_index_finished)
+        self.bridge.devices.connect(self._populate_devices)
+        self.bridge.card_image.connect(self._show_card_image)
+        self.bridge.camera_error.connect(self._on_camera_error)
 
+        # Both callbacks fire on the camera thread, so they only emit signals.
         self.camera.on_frame = lambda frame: self.bridge.frame.emit(frame)
-        self.camera.on_error = self._on_camera_error
+        self.camera.on_error = lambda message: self.bridge.camera_error.emit(message)
 
         self.refresh_button.clicked.connect(lambda: self.pool.submit(self._refresh_devices))
         self.start_button.clicked.connect(self._start_camera)
@@ -480,10 +492,11 @@ class MainWindow(QMainWindow):
     # -------------------------------------------------------------- camera
 
     def _refresh_devices(self) -> None:
+        """Runs on a worker thread — enumeration can take a second per probed index."""
         self.bridge.status.emit("Detecting video devices…")
-        devices = camera_mod.enumerate_devices()
-        QTimer.singleShot(0, lambda: self._populate_devices(devices))
+        self.bridge.devices.emit(camera_mod.enumerate_devices())
 
+    @Slot(object)
     def _populate_devices(self, devices: list[CameraDevice]) -> None:
         keep = self.device_combo.currentData()
         self.device_combo.clear()
@@ -535,13 +548,12 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(False)
         self.status_label.setText("Stopped.")
 
+    @Slot(str)
     def _on_camera_error(self, message: str) -> None:
-        def report() -> None:
-            self._stop_camera()
-            self.status_label.setText("Camera stopped — device error.")
-            QMessageBox.warning(self, "Camera error", message)
-
-        QTimer.singleShot(0, report)
+        """Delivered via signal, so this always runs on the GUI thread."""
+        self._stop_camera()
+        self.status_label.setText("Camera stopped — device error.")
+        QMessageBox.warning(self, "Camera error", message)
 
     def _on_zoom_changed(self, value: int) -> None:
         self._zoom = value / 10.0
@@ -646,19 +658,18 @@ class MainWindow(QMainWindow):
 
         def fetch() -> None:
             data = self.scryfall.download_image(url)
-            if not data:
-                return
-
-            def show() -> None:
-                pixmap = QPixmap()
-                if pixmap.loadFromData(data):
-                    self.card_image.setPixmap(pixmap.scaled(
-                        self.card_image.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation))
-
-            QTimer.singleShot(0, show)
+            if data:
+                self.bridge.card_image.emit(data)
 
         self.pool.submit(fetch)
+
+    @Slot(object)
+    def _show_card_image(self, data: bytes) -> None:
+        pixmap = QPixmap()
+        if pixmap.loadFromData(data):
+            self.card_image.setPixmap(pixmap.scaled(
+                self.card_image.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation))
 
     def _ensure_printings(self, card: ScannedCard) -> None:
         if card.name == self._printings_for:

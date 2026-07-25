@@ -46,13 +46,43 @@ class CameraDevice:
 # ---------------- device enumeration (per-OS) ----------------
 
 def _windows_devices() -> list[CameraDevice]:
-    """DirectShow enumeration order matches OpenCV's CAP_DSHOW index."""
-    try:
-        from pygrabber.dshow_graph import FilterGraph
-        names = FilterGraph().get_input_devices()
-        return [CameraDevice(i, n or f"Camera {i}") for i, n in enumerate(names)]
-    except Exception:
-        return []
+    """DirectShow enumeration order matches OpenCV's CAP_DSHOW index.
+
+    Runs on a dedicated thread that initialises COM itself. DirectShow requires COM to be
+    initialised per-thread, and the caller's apartment state cannot be relied upon: a Qt GUI
+    thread may already have COM in a conflicting mode, and thread-pool workers have none at
+    all. Either case makes enumeration throw, which would silently degrade the device list to
+    "Camera 0", "Camera 1".
+    """
+    result: list[CameraDevice] = []
+
+    def enumerate_with_com() -> None:
+        initialised = False
+        try:
+            import comtypes
+            try:
+                comtypes.CoInitialize()
+                initialised = True
+            except Exception:
+                pass  # already initialised in a compatible mode
+
+            from pygrabber.dshow_graph import FilterGraph
+            names = FilterGraph().get_input_devices()
+            result.extend(CameraDevice(i, n or f"Camera {i}") for i, n in enumerate(names))
+        except Exception:
+            result.clear()
+        finally:
+            if initialised:
+                try:
+                    import comtypes
+                    comtypes.CoUninitialize()
+                except Exception:
+                    pass
+
+    thread = threading.Thread(target=enumerate_with_com, name="dshow-enumerate", daemon=True)
+    thread.start()
+    thread.join(timeout=15)
+    return result
 
 
 def _linux_devices() -> list[CameraDevice]:
