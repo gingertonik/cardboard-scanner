@@ -372,3 +372,20 @@ the C# properties match):
   `xattr -d com.apple.quarantine "/Applications/Cardboard Scanner.app"`.
 - **Linux: fails to start with a Qt/xcb error.** Install the usual Qt runtime libraries:
   `sudo apt install libgl1 libegl1 libxkbcommon-x11-0 libdbus-1-3 libxcb-cursor0`.
+
+---
+
+## License
+
+Cardboard Scanner is free software under the **[GNU General Public License v3.0](LICENSE)**.
+You may use, study, modify, and redistribute it; distributed modified versions must also be
+released under the GPL, with source.
+
+The released binaries bundle third-party components under their own licenses — most notably
+**Qt via PySide6 under the LGPL-3.0**, which grants you the right to swap in your own Qt build
+and relink. See **[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)** for the full list and for
+how that right is satisfied here.
+
+Magic: The Gathering is © Wizards of the Coast; this is unofficial Fan Content, not approved
+or endorsed by Wizards. Card data comes from [Scryfall](https://scryfall.com) under their
+terms — the bundled index holds only non-reversible hashes and identifiers, never artwork.
